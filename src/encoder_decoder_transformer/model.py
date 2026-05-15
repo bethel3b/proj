@@ -110,7 +110,7 @@ if __name__ == "__main__":
         0.1,
     )
     # create a encoder decoder transformer
-    encoder_decoder_transformer = EncoderDecoderTransformer(
+    model = EncoderDecoderTransformer(
         vocab_size=vocab_size,
         d_model=d_model,
         d_ff=d_ff,
@@ -125,8 +125,11 @@ if __name__ == "__main__":
     target_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
 
     # forward pass
-    output = encoder_decoder_transformer(
-        source_tokens=source_tokens, target_tokens=target_tokens
-    )
+    output = model(source_tokens=source_tokens, target_tokens=target_tokens)
     print(output.shape)
     print(output)
+
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"  Params: {total:,} total ({trainable:,} trainable)")
+    print()
