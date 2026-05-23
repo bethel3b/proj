@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from datasets import Dataset, DatasetDict
 from torch.utils.data import DataLoader
@@ -6,6 +8,7 @@ from src.gpt.model import DecoderOnlyTransformer
 from torch import optim, nn
 from tqdm import tqdm
 from src.utils.utils import print_header
+import mlflow
 
 
 def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
@@ -161,14 +164,15 @@ def train_epoch(
     epoch: int,
     loader: DataLoader,
     model: nn.Module,
-    optimizer: optim,
+    optimizer: optim.Optimizer,
     criterion: nn.Module,
     device: str,
-) -> None:
+) -> float:
     model.train()
     epoch_loss = 0.0
     num_batches = 0
     for batch in tqdm(loader, desc=f"Epoch {epoch} [Train]"):
+        optimizer.zero_grad()
         # Forward pass
         logits = model(
             input_tokens=batch["input_tokens"].to(device),
@@ -176,8 +180,9 @@ def train_epoch(
         )
         labels = batch["labels"].to(device)
 
-        # Reshape logit and labels
-        logits_shifted = logits[:, 1:, :]
+        # Drop the last logit (no next-token target) so logits[:, t] is
+        # paired with the token at position t+1, which `labels` already holds.
+        logits_shifted = logits[:, :-1, :]
         batch_size, seq_len, vocab_size = logits_shifted.shape
         logits_shifted = logits_shifted.reshape(batch_size * seq_len, vocab_size)
         labels = labels.reshape(batch_size * seq_len)
@@ -187,7 +192,6 @@ def train_epoch(
         epoch_loss += loss.item()
 
         # Backward pass
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
@@ -204,29 +208,29 @@ def eval_epoch(
     criterion: nn.Module,
     device: str,
     mode: str,
-) -> None:
+) -> float:
     model.eval()
     epoch_loss = 0.0
     num_batches = 0
-    for batch in tqdm(loader, desc=f"Epoch {epoch} [{mode}]"):
-        # Forward pass
-        logits = model(
-            input_tokens=batch["input_tokens"].to(device),
-            attention_mask=batch["attention_mask"].to(device),
-        )
-        labels = batch["labels"].to(device)
+    with torch.no_grad():
+        for batch in tqdm(loader, desc=f"Epoch {epoch} [{mode}]"):
+            # Forward pass
+            logits = model(
+                input_tokens=batch["input_tokens"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+            )
+            labels = batch["labels"].to(device)
 
-        # Reshape logit and labels
-        logits_shifted = logits[:, 1:, :]
-        batch_size, seq_len, vocab_size = logits_shifted.shape
-        logits_shifted = logits_shifted.reshape(batch_size * seq_len, vocab_size)
-        labels = labels.reshape(batch_size * seq_len)
+            logits_shifted = logits[:, :-1, :]
+            batch_size, seq_len, vocab_size = logits_shifted.shape
+            logits_shifted = logits_shifted.reshape(batch_size * seq_len, vocab_size)
+            labels = labels.reshape(batch_size * seq_len)
 
-        # Calculate loss
-        loss = criterion(logits_shifted, labels)
-        epoch_loss += loss
+            # Calculate loss
+            loss = criterion(logits_shifted, labels)
+            epoch_loss += loss.item()
 
-        num_batches += 1
+            num_batches += 1
 
     avg_epoch_loss = epoch_loss / num_batches
     return avg_epoch_loss
@@ -240,6 +244,7 @@ def train(
     optim_args: dict,
     criterion_args: dict,
     training_args: dict,
+    mlflow_args: dict,
 ) -> None:
     dataset = load_dataset(data_args)
     tokenizer = Tokenizer(
@@ -264,70 +269,94 @@ def train(
     device = training_args["device"]
     model.to(device)
 
-    best_model = model
-    best_val_loss = float("inf")
-    best_epoch = 0
-    epoch_one_loss = None
+    # Training with MLflow logging
+    mlflow.set_tracking_uri(mlflow_args["tracker_url"])
+    mlflow.set_experiment(mlflow_args["experiment_name"])
+    with mlflow.start_run(run_name=mlflow_args["run_name"]):
+        # Enable system metrics logging
+        mlflow.enable_system_metrics_logging()
 
-    # Initial Validation
-    print_header(text="Initital Validation")
-    init_loss = eval_epoch(
-        epoch=0,
-        loader=test_loader,
-        model=model,
-        criterion=criterion,
-        device=device,
-        mode="Init",
-    )
-    print(f"Init Loss: {init_loss:.4f}")
-
-    print_header(text="Started Training")
-    for epoch in range(1, epochs + 1):
-        # Training
-        train_loss = train_epoch(
-            epoch=epoch,
-            loader=train_loader,
-            model=model,
-            optimizer=optimizer,
-            criterion=criterion,
-            device=device,
+        mlflow.log_params(
+            {
+                "epochs": training_args["epochs"],
+                "batch_size": dataloader_args["batch_size"],
+                "lr": optim_args["lr"],
+            }
         )
-        epoch_one_loss = train_loss if epoch == 1 else None
 
-        # Validation
-        val_loss = eval_epoch(
-            epoch=epoch,
+        best_state = copy.deepcopy(model.state_dict())
+        best_val_loss = float("inf")
+        best_epoch = 0
+        epoch_one_loss = None
+
+        # Initial Validation
+        print_header(text="Initital Validation")
+        init_loss = eval_epoch(
+            epoch=0,
             loader=valid_loader,
             model=model,
             criterion=criterion,
             device=device,
-            mode="Val",
+            mode="Init",
         )
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"Init Loss: {init_loss:.4f}")
+        mlflow.log_metrics({"init_loss": init_loss}, step=best_epoch)
 
-        if val_loss <= best_val_loss:
-            best_model = model
-            best_epoch = epoch
-            best_val_loss = val_loss
+        print_header(text="Started Training")
+        for epoch in range(1, epochs + 1):
+            # Training
+            train_loss = train_epoch(
+                epoch=epoch,
+                loader=train_loader,
+                model=model,
+                optimizer=optimizer,
+                criterion=criterion,
+                device=device,
+            )
+            if epoch == 1:
+                epoch_one_loss = train_loss
 
-    print(
-        f"Initial Loss [epoch 0]={init_loss:.4f}"
-        f"\nLoss [epoch 1]={epoch_one_loss}"
-        f"\nFinal Loss [epoch {epoch}]={val_loss:.4f}"
-    )
-    print(f"Best model: loss={best_val_loss:.4f} at Epoch {best_epoch}")
+            # Validation
+            val_loss = eval_epoch(
+                epoch=epoch,
+                loader=valid_loader,
+                model=model,
+                criterion=criterion,
+                device=device,
+                mode="Val",
+            )
+            print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            mlflow.log_metrics(
+                {"train_loss": train_loss, "val_loss": val_loss}, step=epoch
+            )
 
-    # Final test
-    print_header(text="Final Validation")
-    test_loss = eval_epoch(
-        epoch=best_epoch,
-        loader=test_loader,
-        model=best_model,
-        criterion=criterion,
-        device=device,
-        mode="Test",
-    )
-    print(f"Test Loss: {test_loss:.4}")
+            if val_loss <= best_val_loss:
+                best_state = copy.deepcopy(model.state_dict())
+                best_epoch = epoch
+                best_val_loss = val_loss
+
+        print(
+            f"\nInitial Loss [epoch 0]={init_loss:.4f}"
+            f"\nLoss [epoch 1]={epoch_one_loss}"
+            f"\nFinal Loss [epoch {epoch}]={val_loss:.4f}"
+            f"\nBest Loss [epoch {best_epoch}]={best_val_loss:.4f}"
+        )
+        # Log final model
+        mlflow.pytorch.log_model(model, name="model")
+
+        # Final test — restore the best validation checkpoint first.
+        model.load_state_dict(best_state)
+        print_header(text="Final Validation")
+        test_loss = eval_epoch(
+            epoch=best_epoch,
+            loader=test_loader,
+            model=model,
+            criterion=criterion,
+            device=device,
+            mode="Test",
+        )
+        print(f"Test Loss: {test_loss:.4f}")
+        mlflow.log_metrics({"test_loss": test_loss}, step=best_epoch)
 
 
 if __name__ == "__main__":
@@ -346,7 +375,7 @@ if __name__ == "__main__":
         "n_layers": 6,
         "max_seq_len": 128,
         "dropout": 0.0,
-    }  # EncoderDecoderTransformer Model
+    }  # DecoderOnlyTransformer Model
     optim_args = {
         "lr": 1e-4,
         "betas": (0.9, 0.98),
@@ -361,6 +390,12 @@ if __name__ == "__main__":
 
     training_args = {"epochs": 10, "device": "cpu"}
 
+    mlflow_args = {
+        "experiment_name": "GPT (Decoder Only)",
+        "run_name": "Test run",
+        "tracker_url": "http://localhost:5000",
+    }
+
     train(
         data_args=data_args,
         tokenizer_args=tokenizer_args,
@@ -369,6 +404,7 @@ if __name__ == "__main__":
         optim_args=optim_args,
         criterion_args=criterion_args,
         training_args=training_args,
+        mlflow_args=mlflow_args,
     )
 
     print()
