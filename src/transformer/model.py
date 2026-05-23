@@ -1,6 +1,6 @@
 import torch.nn as nn
-from src.encoder_decoder_transformer.encoder import EncoderStack
-from src.encoder_decoder_transformer.decoder import DecoderStack
+from src.transformer.encoder import EncoderStack
+from src.transformer.decoder import DecoderStack
 from src.utils.positional_encoder import PositionalEncoder
 import torch
 
