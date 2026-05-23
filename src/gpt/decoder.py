@@ -14,27 +14,27 @@ class DecoderLayer(nn.Module):
             dropout (float, optional): Dropout rate. Defaults to 0.0.
         """
         super().__init__()
+
+        self.layer_norm1 = nn.LayerNorm(d_model)
+
         # Projection Layers for decoder input
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
+        self.q_proj = nn.Linear(d_model, d_model, bias=False)
+        self.k_proj = nn.Linear(d_model, d_model, bias=False)
+        self.v_proj = nn.Linear(d_model, d_model, bias=False)
 
         # Multi-Head attention Layer
         self.masked_self_attention = MultiHeadAttention(
             d_model=d_model, n_heads=n_heads, dropout=dropout, is_causal=True
         )
 
-        self.layer_norm1 = nn.LayerNorm(d_model)
+        self.layer_norm2 = nn.LayerNorm(d_model)
 
         # Feed Forward Layer
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model, d_ff),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.GELU(),
             nn.Linear(d_ff, d_model),
         )
-
-        self.layer_norm2 = nn.LayerNorm(d_model)
 
         # Dropout Layer
         self.dropout = nn.Dropout(dropout)
@@ -68,7 +68,7 @@ class DecoderLayer(nn.Module):
 
         # Dropout, Residual, Layer Norm
         ff_output = self.dropout(ff_output)
-        ff_output = self.layer_norm2((ff_output + attention_output))
+        ff_output = self.layer_norm2(ff_output + attention_output)
 
         return ff_output
 

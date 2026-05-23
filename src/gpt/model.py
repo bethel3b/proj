@@ -1,6 +1,6 @@
 import torch.nn as nn
 from src.utils.positional_encoder import PositionalEncoder
-from src.decoder_only_transformer.decoder import DecoderStack
+from src.gpt.decoder import DecoderStack
 import torch
 
 
@@ -28,7 +28,7 @@ class DecoderOnlyTransformer(nn.Module):
         """
         super().__init__()
         # Positional Embedding Layers
-        self.decoder_embed_layer = PositionalEncoder(
+        self.embedding_layer = PositionalEncoder(
             vocab_size=vocab_size,
             d_model=d_model,
             max_seq_len=max_seq_len,
@@ -46,6 +46,7 @@ class DecoderOnlyTransformer(nn.Module):
 
         # Final output projection layer
         self.output_proj = nn.Linear(d_model, vocab_size)
+        self.output_proj.weight = self.embedding_layer.token_embedder.weight
 
     def forward(self, input_tokens, attention_mask=None):
         """Forward pass for the decoder only transformer.
@@ -63,7 +64,7 @@ class DecoderOnlyTransformer(nn.Module):
         )
 
         # Embed the input tokens
-        input_embed = self.decoder_embed_layer(input_tokens)
+        input_embed = self.embedding_layer(input_tokens)
 
         # Decode the input tokens
         decoder_output = self.decoder(
@@ -76,17 +77,16 @@ class DecoderOnlyTransformer(nn.Module):
 
 
 if __name__ == "__main__":
-    vocab_size, d_model, d_ff, n_heads, n_layers, max_seq_len, dropout = (
-        10,
-        5,
-        10,
-        1,
-        2,
-        12,
-        0.1,
-    )
+    vocab_size = 40000
+    d_model = 768
+    d_ff = 3072
+    n_heads = 12
+    n_layers = 12
+    max_seq_len = 512
+    dropout = 0.1
+
     # create a encoder decoder transformer
-    decoder_only_transformer = DecoderOnlyTransformer(
+    model = DecoderOnlyTransformer(
         vocab_size=vocab_size,
         d_model=d_model,
         d_ff=d_ff,
@@ -96,13 +96,15 @@ if __name__ == "__main__":
         dropout=dropout,
     )
 
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Params: {total:,} total ({trainable:,} trainable)")
+
     # create a test tensor
     input_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
     attention_mask = None
 
     # forward pass
-    output = decoder_only_transformer(
-        input_tokens=input_tokens, attention_mask=attention_mask
-    )
+    output = model(input_tokens=input_tokens, attention_mask=attention_mask)
     print(output.shape)
     print(output)
