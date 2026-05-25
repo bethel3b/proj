@@ -45,7 +45,7 @@ class DecoderOnlyTransformer(nn.Module):
         )
 
         # Final output projection layer
-        self.output_proj = nn.Linear(d_model, vocab_size)
+        self.output_proj = nn.Linear(d_model, vocab_size, bias=False)
         self.output_proj.weight = self.embedding_layer.token_embedder.weight
 
     def forward(self, input_tokens, attention_mask=None):
@@ -99,6 +99,10 @@ if __name__ == "__main__":
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Params: {total:,} total ({trainable:,} trainable)")
+
+    original_gpt_param_count = 116_130_816
+    if trainable == original_gpt_param_count:
+        print("Congratulations!!")
 
     # create a test tensor
     input_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
