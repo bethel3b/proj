@@ -13,8 +13,10 @@ def generate_next(input, model):
 
 
 def generate(sequence, model_args, tokenizer_args, max_new_tokens):
+    # Tokenizer
     tokenizer_path = tokenizer_args["tokenizer_path"]
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    # Model
     model = DecoderOnlyTransformer(
         vocab_size=tokenizer.vocab_size,
         d_model=model_args["d_model"],
