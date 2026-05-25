@@ -14,12 +14,13 @@ from src.utils.utils import print_header
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 
-def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
+def load_dataset(data_args: dict[str, Any], seed: int = 42) -> DatasetDict:
     """Load a line-delimited text file and split 70/20/10 into train/valid/test."""
     print_header(text="Loading and splitting dataset (Train/Valid/Test)")
     print(f"Source: {data_args['dataset_path']}")
     with open(data_args["dataset_path"], "r") as f:
         text = f.read().splitlines()
+
     dataset = Dataset.from_list([{"text": sentence} for sentence in text])
 
     # 70% train, 30% held out
@@ -29,7 +30,7 @@ def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
     # test_size = 10/30 = 1/3 of the held-out portion.
     valid_test = train_heldout["test"].train_test_split(test_size=1 / 3, seed=seed)
 
-    split_dataset = DatasetDict(
+    split_dataset_dict = DatasetDict(
         {
             "train": train_heldout["train"],
             "valid": valid_test["train"],
@@ -38,15 +39,16 @@ def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
     )
 
     print(
-        f"[Split sizes] Train: {len(split_dataset['train'])}, "
-        f"Valid: {len(split_dataset['valid'])}, Test: {len(split_dataset['test'])}"
+        f"[Split sizes] Train: {len(split_dataset_dict['train'])}, "
+        f"Valid: {len(split_dataset_dict['valid'])}, "
+        f"Test: {len(split_dataset_dict['test'])}"
     )
 
-    return split_dataset
+    return split_dataset_dict
 
 
 def tokenize_dataset(
-    dataset: DatasetDict, tokenizer_args: dict
+    dataset_dict: DatasetDict, tokenizer_args: dict
 ) -> tuple[Dataset, Dataset, Dataset, PreTrainedTokenizerBase]:
     """Tokenize each split, returning torch-formatted HF Datasets that
     expose `input_ids` and `attention_mask` per row."""
@@ -55,7 +57,7 @@ def tokenize_dataset(
     tokenizer_path = tokenizer_args["tokenizer_path"]
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    def _tokenize_text_batch(batch: dict[str, list[str]]) -> dict[str, Any]:
+    def _tokenize_batch(batch: dict[str, list[str]]) -> dict[str, Any]:
         return tokenizer(
             batch["text"],
             padding=tokenizer_args["padding"],
@@ -65,8 +67,8 @@ def tokenize_dataset(
 
     tokenized_sets = {}
     for split in ["train", "valid", "test"]:
-        tokenized = dataset[split].map(
-            _tokenize_text_batch,
+        tokenized = dataset_dict[split].map(
+            _tokenize_batch,
             batched=True,
             batch_size=tokenizer_args["batch_size"],
         )
@@ -136,10 +138,8 @@ def create_dataloader(
     return train_loader, valid_loader, test_loader
 
 
-def initialize_model(
-    tokenizer: AutoTokenizer, model_args: dict
-) -> DecoderOnlyTransformer:
-    """Build the decoder-only transformer and report its parameter count."""
+def build_model(tokenizer: AutoTokenizer, model_args: dict) -> DecoderOnlyTransformer:
+    """Build the decoder-only transformer (GPT) and report its parameter count."""
     print_header(text="Initializing model")
     model = DecoderOnlyTransformer(
         vocab_size=tokenizer.vocab_size,
@@ -291,10 +291,10 @@ def train(
     mlflow_args: dict,
 ) -> None:
     """End-to-end training entry point."""
-    dataset = load_dataset(data_args)
+    dataset_dict = load_dataset(data_args=data_args)
 
     train_set, valid_set, test_set, tokenizer = tokenize_dataset(
-        dataset, tokenizer_args
+        dataset_dict=dataset_dict, tokenizer_args=tokenizer_args
     )
     train_loader, valid_loader, test_loader = create_dataloader(
         train_set=train_set,
@@ -303,7 +303,7 @@ def train(
         batch_size=dataloader_args["batch_size"],
     )
 
-    model = initialize_model(tokenizer=tokenizer, model_args=model_args)
+    model = build_model(tokenizer=tokenizer, model_args=model_args)
     optimizer = initialize_optimizer(model=model, optim_args=optim_args)
     criterion = initialize_criterion(tokenizer=tokenizer, criterion_args=criterion_args)
 
