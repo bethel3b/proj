@@ -121,11 +121,64 @@ if __name__ == "__main__":
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Params: {total:,} total ({trainable:,} trainable)")
 
+    # Base Transformer (Vaswani 2017): sinusoidal pos encoding, tied embeddings, no LM-head bias.
+    original_transformer_param_count = 63_045_632
+    if trainable != original_transformer_param_count:
+        diff = trainable - original_transformer_param_count
+        print(
+            f"Mismatch: actual {trainable:,} vs expected {original_transformer_param_count:,} "
+            f"(diff {diff:+,})"
+        )
+
+        # Expected per-module counts for the original paper config.
+        # Embedding: token table only (sinusoidal pos = 0 params, output proj tied = 0).
+        expected_embedding = vocab_size * d_model
+        # Per encoder layer: 4 attn projections (Q/K/V/O, no bias) + 2 LayerNorms + FFN(with bias).
+        expected_encoder_layer = (
+            4 * d_model * d_model
+            + 2 * (2 * d_model)
+            + (d_model * d_ff + d_ff)
+            + (d_ff * d_model + d_model)
+        )
+        # Per decoder layer: 8 attn projections (self Q/K/V/O + cross Q/K/V/O) + 3 LayerNorms + FFN.
+        expected_decoder_layer = (
+            8 * d_model * d_model
+            + 3 * (2 * d_model)
+            + (d_model * d_ff + d_ff)
+            + (d_ff * d_model + d_model)
+        )
+        # All encoder layers are identical, same for decoder layers — compare just one of each.
+        expected = {
+            "embedding_layer": expected_embedding,
+            "encoder.layers.0": expected_encoder_layer,
+            "decoder.layers.0": expected_decoder_layer,
+        }
+
+        actual = {
+            "embedding_layer": sum(
+                p.numel() for p in model.embedding_layer.parameters()
+            ),
+            "encoder.layers.0": sum(
+                p.numel() for p in model.encoder.layers[0].parameters()
+            ),
+            "decoder.layers.0": sum(
+                p.numel() for p in model.decoder.layers[0].parameters()
+            ),
+        }
+
+        print(f"\n{'Module':30s} {'Actual':>15} {'Expected':>15} {'Diff':>12}  Match")
+        for key, exp in expected.items():
+            act = actual[key]
+            d = act - exp
+            marker = "OK" if d == 0 else "DIFF"
+            print(f"  {key:28s} {act:>15,} {exp:>15,} {d:>+12,}  {marker}")
+
     # create a test tensor
     source_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
     target_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
 
     # forward pass
+
     output = model(source_tokens=source_tokens, target_tokens=target_tokens)
     print(output.shape)
     print(output)
