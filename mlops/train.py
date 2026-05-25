@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Literal
+from typing import Literal, Any
 
 import mlflow
 import torch
@@ -9,9 +9,9 @@ from torch import optim, nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.data_utils.tokenizer_utils import Tokenizer
 from src.gpt.model import DecoderOnlyTransformer
 from src.utils.utils import print_header
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 
 def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
@@ -46,17 +46,41 @@ def load_dataset(data_args: dict, seed: int = 42) -> DatasetDict:
 
 
 def tokenize_dataset(
-    dataset: DatasetDict, tokenizer: Tokenizer
-) -> tuple[Dataset, Dataset, Dataset]:
+    dataset: DatasetDict, tokenizer_args: dict
+) -> tuple[Dataset, Dataset, Dataset, PreTrainedTokenizerBase]:
     """Tokenize each split, returning torch-formatted HF Datasets that
     expose `input_ids` and `attention_mask` per row."""
     print_header(text="Tokenizing splits (Train/Valid/Test)")
-    train_set = tokenizer(dataset["train"])
-    valid_set = tokenizer(dataset["valid"])
-    test_set = tokenizer(dataset["test"])
-    print(f"Vocab size: {tokenizer.get_vocab_size():,}")
-    print(f"Columns after tokenization: {train_set.column_names}")
-    return train_set, valid_set, test_set
+
+    tokenizer_path = tokenizer_args["tokenizer_path"]
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
+    def _tokenize_text_batch(batch: dict[str, list[str]]) -> dict[str, Any]:
+        return tokenizer(
+            batch["text"],
+            padding=tokenizer_args["padding"],
+            max_length=tokenizer_args["max_length"],
+            truncation=True,
+        )
+
+    tokenized_sets = {}
+    for split in ["train", "valid", "test"]:
+        tokenized = dataset[split].map(
+            _tokenize_text_batch,
+            batched=True,
+            batch_size=tokenizer_args["batch_size"],
+        )
+        tokenized.set_format("torch", columns=["input_ids", "attention_mask"])
+        tokenized_sets[split] = tokenized
+
+    print(f"Vocab size: {tokenizer.vocab_size:,}")
+    print(f"Columns after tokenization: {tokenized_sets['train'].column_names}")
+    return (
+        tokenized_sets["train"],
+        tokenized_sets["valid"],
+        tokenized_sets["test"],
+        tokenizer,
+    )
 
 
 def collate_fn(batch: list[dict]) -> dict[str, torch.Tensor]:
@@ -112,11 +136,13 @@ def create_dataloader(
     return train_loader, valid_loader, test_loader
 
 
-def initialize_model(tokenizer: Tokenizer, model_args: dict) -> DecoderOnlyTransformer:
+def initialize_model(
+    tokenizer: AutoTokenizer, model_args: dict
+) -> DecoderOnlyTransformer:
     """Build the decoder-only transformer and report its parameter count."""
     print_header(text="Initializing model")
     model = DecoderOnlyTransformer(
-        vocab_size=tokenizer.get_vocab_size(),
+        vocab_size=tokenizer.vocab_size,
         d_model=model_args["d_model"],
         d_ff=model_args["d_ff"],
         n_heads=model_args["n_heads"],
@@ -153,7 +179,7 @@ def initialize_optimizer(model: nn.Module, optim_args: dict) -> optim.AdamW:
 
 
 def initialize_criterion(
-    tokenizer: Tokenizer, criterion_args: dict
+    tokenizer: AutoTokenizer, criterion_args: dict
 ) -> nn.CrossEntropyLoss:
     """Build CrossEntropyLoss with `ignore_index=pad_id` so padded
     positions are excluded from the loss, and label smoothing from
@@ -161,8 +187,8 @@ def initialize_criterion(
     print_header(text="Initializing criterion")
     # pad/eos collision check — `ignore_index=pad_id` would also mask EOS
     # tokens in targets if the two share an id (GPT-2-style tokenizers).
-    pad_id = tokenizer.tokenizer.pad_token_id
-    eos_id = tokenizer.tokenizer.eos_token_id
+    pad_id = tokenizer.pad_token_id
+    eos_id = tokenizer.eos_token_id
     if pad_id == eos_id:
         raise ValueError(
             f"pad_token_id ({pad_id}) equals eos_token_id ({eos_id}); "
@@ -266,13 +292,10 @@ def train(
 ) -> None:
     """End-to-end training entry point."""
     dataset = load_dataset(data_args)
-    tokenizer = Tokenizer(
-        tokenizer_path=tokenizer_args["tokenizer_path"],
-        batch_size=tokenizer_args["batch_size"],
-        padding=tokenizer_args["padding"],
-        max_length=tokenizer_args["max_length"],
+
+    train_set, valid_set, test_set, tokenizer = tokenize_dataset(
+        dataset, tokenizer_args
     )
-    train_set, valid_set, test_set = tokenize_dataset(dataset, tokenizer)
     train_loader, valid_loader, test_loader = create_dataloader(
         train_set=train_set,
         valid_set=valid_set,
