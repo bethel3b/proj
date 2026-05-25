@@ -28,12 +28,16 @@ class PositionalEncoder(nn.Module):
         # scale
         self.scale = d_model ** 0.5
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, position_offset: int = 0) -> torch.Tensor:
         """Forward pass for the positional encoder.
 
         Args:
-            tokens (torch.Tensor): Input tensor. 
+            tokens (torch.Tensor): Input tensor.
                 Shape: (batch_size, seq_len)
+            position_offset (int, optional): Starting absolute position for the
+                first token in ``tokens``. Non-zero during KV-cache decode, when
+                the input is a single new token sitting at position S of the
+                full sequence rather than position 0.
 
         Returns:
             torch.Tensor: Output tensor.
@@ -46,7 +50,9 @@ class PositionalEncoder(nn.Module):
         token_embeddings = self.token_embedder(tokens) * self.scale
 
         # Get the positional embeddings - 1, seq_len
-        positional_ids = torch.arange(0, seq_len, device=tokens.device).unsqueeze(0)
+        positional_ids = torch.arange(
+            position_offset, position_offset + seq_len, device=tokens.device
+        ).unsqueeze(0)
 
         # Get the positional embeddings - 1, seq_len, d_model
         pos_embeddings = self.pos_embedder(positional_ids)
