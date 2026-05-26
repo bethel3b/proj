@@ -48,23 +48,19 @@ class DecoderOnlyTransformer(nn.Module):
         self.output_proj = nn.Linear(d_model, vocab_size, bias=False)
         self.output_proj.weight = self.embedding_layer.token_embedder.weight
 
-    def forward(self, input_tokens, attention_mask=None):
+    def forward(self, input_ids, attention_mask):
         """Forward pass for the decoder only transformer.
 
         Args:
-            input_tokens (torch.Tensor): Input tensor to the decoder layer.
+            input_ids (torch.Tensor): Input tensor to the decoder layer.
             attention_mask (torch.Tensor): Padding mask for the decoder input.
         """
         # Convert attention masks to padding masks and reshape to (B, 1, 1, K)
         # so they broadcast over (B, n_heads, Q, K) attention scores.
-        padding_mask = (
-            (~attention_mask.bool()).unsqueeze(1).unsqueeze(2)
-            if attention_mask is not None
-            else None
-        )
+        padding_mask = (~attention_mask.bool()).unsqueeze(1).unsqueeze(2)
 
         # Embed the input tokens
-        input_embed = self.embedding_layer(input_tokens)
+        input_embed = self.embedding_layer(input_ids)
 
         # Decode the input tokens
         decoder_output = self.decoder(
@@ -105,10 +101,10 @@ if __name__ == "__main__":
         print("Congratulations!!")
 
     # create a test tensor
-    input_tokens = torch.randint(0, vocab_size, (1, max_seq_len))
-    attention_mask = None
+    input_ids = torch.randint(0, vocab_size, (1, max_seq_len))
+    attention_mask = torch.ones((input_ids.size(0), 1), dtype=input_ids.dtype)
 
     # forward pass
-    output = model(input_tokens=input_tokens, attention_mask=attention_mask)
+    output = model(input_ids=input_ids, attention_mask=attention_mask)
     print(output.shape)
     print(output)
