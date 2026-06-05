@@ -13,6 +13,7 @@ from src.gpt_with_kv_caching.model import DecoderOnlyTransformer
 from src.utils.utils import print_header
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from torch.optim.lr_scheduler import ExponentialLR
+from mlops.utils.train_utils import compute_grad_norm
 
 
 def load_dataset(data_args: dict[str, Any], seed: int = 42) -> DatasetDict:
@@ -259,6 +260,10 @@ def train_epoch(
 
         if mode == "Train":
             loss.backward()
+            grad_norm = nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=float("inf")
+            )
+            grad_norm2 = compute_grad_norm(model=model)
             optimizer.step()
 
         # Step-level logging: per-batch loss for Train/Val; LR + step
@@ -269,7 +274,10 @@ def train_epoch(
             )
         if mode == "Train":
             current_lr = optimizer.param_groups[0]["lr"]
-            mlflow.log_metrics({"step_level/lr": current_lr}, step=global_step)
+            mlflow.log_metrics(
+                {"step_level/lr": current_lr, "step_level/grad_norm": grad_norm},
+                step=global_step,
+            )
             global_step += 1
 
         num_batches += 1
@@ -309,6 +317,7 @@ def train(
     optimizer = initialize_optimizer(model=model, optim_args=optim_args)
     criterion = initialize_criterion(tokenizer=tokenizer, criterion_args=criterion_args)
 
+    print_header(text="Initial Scheduler")
     scheduler = ExponentialLR(optimizer, gamma=scheduler_args["gamma"])
 
     epochs = training_args["epochs"]
@@ -320,6 +329,7 @@ def train(
         os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Training with MLflow logging
+    print_header(text="Setting up mlflow")
     mlflow.set_tracking_uri(mlflow_args["tracker_url"])
     mlflow.set_experiment(mlflow_args["experiment_name"])
     with mlflow.start_run(run_name=mlflow_args["run_name"]):
@@ -401,6 +411,7 @@ def train(
                         ckpt_path,
                     )
                     print(f"Saved best checkpoint to {ckpt_path}")
+                    mlflow.log_artifact(ckpt_path, artifact_path="checkpoints")
 
         print(
             f"\nInitial Loss [epoch 0]={init_loss:.4f}"
@@ -461,7 +472,7 @@ if __name__ == "__main__":
 
     mlflow_args = {
         "experiment_name": "GPT (Decoder Only)",
-        "run_name": "EXP: lr 1e-4",
+        "run_name": "test: grad norm",
         "tracker_url": "http://localhost:5000",
     }
 
