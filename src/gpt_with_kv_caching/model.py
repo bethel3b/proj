@@ -1,10 +1,15 @@
-import torch.nn as nn
-from src.utils.positional_encoder import PositionalEncoder
-from src.gpt_with_kv_caching.decoder import DecoderStack
+"""GPT-style (decoder-only) Transformer language model with key-value caching."""
+
 import torch
+import torch.nn as nn
+
+from src.gpt_with_kv_caching.decoder import DecoderStack
+from src.utils.positional_encoder import PositionalEncoder
 
 
 class DecoderOnlyTransformer(nn.Module):
+    """Decoder-only Transformer with tied embeddings and optional key-value caching."""
+
     def __init__(
         self,
         vocab_size: int,
@@ -26,6 +31,8 @@ class DecoderOnlyTransformer(nn.Module):
             n_layers (int): Number of decoder layers.
             max_seq_len (int): Maximum sequence length.
             dropout (float, optional): Dropout rate. Defaults to 0.0.
+            use_kv_cache (bool, optional): Whether to maintain and return a
+                per-layer key/value cache during the forward pass. Defaults to False.
         """
         super().__init__()
         # Positional Embedding Layers
@@ -52,12 +59,27 @@ class DecoderOnlyTransformer(nn.Module):
 
         self.use_kv_cache = use_kv_cache
 
-    def forward(self, input_ids, attention_mask, kv_cache=None):
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        kv_cache: dict[int, tuple[torch.Tensor, torch.Tensor]] | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """Forward pass for the decoder only transformer.
 
         Args:
-            input_ids (torch.Tensor): Input tensor to the decoder layer.
-            attention_mask (torch.Tensor): Padding mask for the decoder input.
+            input_ids (torch.Tensor): Token ids of shape (batch_size, seq_len).
+                During cached decoding this may be a single new token.
+            attention_mask (torch.Tensor): Attention mask of shape
+                (batch_size, seq_len); 1 for real tokens, 0 for padding.
+            kv_cache (dict[int, tuple[torch.Tensor, torch.Tensor]], optional):
+                Per-layer cached (key, value) tensors from previous steps.
+                Defaults to None.
+
+        Returns:
+            torch.Tensor | tuple[torch.Tensor, dict]: Output logits of shape
+                (batch_size, seq_len, vocab_size). When ``use_kv_cache`` is True,
+                also returns the updated per-layer key/value cache.
         """
         # Convert attention masks to padding masks and reshape to (B, 1, 1, K)
         # so they broadcast over (B, n_heads, Q, K) attention scores.
