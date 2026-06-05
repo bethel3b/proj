@@ -16,19 +16,19 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
         description="Train the decoder-only (GPT) transformer.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
+    # dataset args
     data = parser.add_argument_group("data")
     data.add_argument("--dataset-path", type=str, default="data/dataset.txt")
-
+    # tokenizer args
     tokenizer = parser.add_argument_group("tokenizer")
     tokenizer.add_argument("--tokenizer-path", type=str, default="t5-small")
     tokenizer.add_argument("--tokenizer-batch-size", type=int, default=100)
     tokenizer.add_argument("--padding", type=str, default="max_length")
     tokenizer.add_argument("--max-length", type=int, default=128)
-
+    # dataloader args
     dataloader = parser.add_argument_group("dataloader")
     dataloader.add_argument("--batch-size", type=int, default=2)
-
+    # models arg
     model = parser.add_argument_group("model")
     model.add_argument("--d-model", type=int, default=512)
     model.add_argument("--d-ff", type=int, default=2048)
@@ -36,7 +36,7 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
     model.add_argument("--n-layers", type=int, default=6)
     model.add_argument("--max-seq-len", type=int, default=128)
     model.add_argument("--dropout", type=float, default=0.0)
-
+    # otpimizer args
     optim = parser.add_argument_group("optim")
     optim.add_argument("--lr", type=float, default=1e-4)
     # betas=(0.9, 0.98) and eps=1e-9 are from "Attention Is All You Need".
@@ -47,21 +47,21 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
     # weight_decay=0 keeps AdamW equivalent to paper-Adam; raise to 0.01 to
     # match common modern practice.
     optim.add_argument("--weight-decay", type=float, default=0.0)
-
+    # criterion args
     criterion = parser.add_argument_group("criterion")
     criterion.add_argument("--label-smoothing", type=float, default=0.1)
-
+    # scheduler args
     scheduler = parser.add_argument_group("scheduler")
     scheduler.add_argument("--gamma", type=float, default=0.9)
-
+    # training args
     training = parser.add_argument_group("training")
     training.add_argument("--epochs", type=int, default=10)
     training.add_argument("--device", type=str, default="cpu")
     training.add_argument("--checkpoint-dir", type=str, default=None)
-
+    # mlflow args
     mlflow = parser.add_argument_group("mlflow")
     mlflow.add_argument("--experiment-name", type=str, default="GPT (Decoder Only)")
-    mlflow.add_argument("--run-name", type=str, default="test: grad norm")
+    mlflow.add_argument("--run-name", type=str, default="test")
     mlflow.add_argument("--tracker-url", type=str, default="http://localhost:5000")
 
     parsed = parser.parse_args()

@@ -12,3 +12,4 @@ wheels/
 uv.lock
 mlartifacts/*
 mlflow.db
+mlflow.log

@@ -22,7 +22,7 @@ class Trainer:
         # dataloader
         self.batch_size = args["batch_size"]
         self.train_loader = args["train_loader"]
-        self.valid_loader = args["val_loader"]
+        self.valid_loader = args["valid_loader"]
         self.test_loader = args["test_loader"]
         # model
         self.model = args["model"]
@@ -78,11 +78,10 @@ class Trainer:
             if mode == "Train":
                 loss.backward()
                 # max_norm=inf measures the global grad norm without clipping.
+                # Manual comp: compute_grad_norm(model=self.model)
                 grad_norm = nn.utils.clip_grad_norm_(
                     self.model.parameters(), max_norm=float("inf")
                 )
-                # Manual L2 norm kept as a cross-check against clip_grad_norm_.
-                grad_norm2 = compute_grad_norm(model=self.model)
                 self.optimizer.step()
 
             # Step-level logging: per-batch loss for Train/Val; LR + step

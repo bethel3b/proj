@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from mlops.gpt.train_args import cli_args_parser
-from mlops.gpt.trainer import Trainer
+from mlops.trainer import Trainer
 from src.gpt_with_kv_caching.model import DecoderOnlyTransformer
 from src.utils.utils import print_header
 
@@ -237,10 +237,9 @@ def train(args) -> None:
     device = args["training_args"]["device"]
     model.to(device)
 
-    # Keys here must match what Trainer.__init__ reads (note: "val_loader").
     trainer_args = {
         "train_loader": train_loader,
-        "val_loader": valid_loader,
+        "valid_loader": valid_loader,
         "test_loader": test_loader,
         "model": model,
         "optimizer": optimizer,
