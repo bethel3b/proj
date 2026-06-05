@@ -89,8 +89,8 @@ class EncoderDecoderTransformer(nn.Module):
             target_tokens[target_tokens == -100] = 0
 
         # Embed the source and target tokens
-        source_embed = self.embedding_layer(source_tokens)
-        target_embed = self.embedding_layer(target_tokens)
+        source_embed = self.embedding_layer(source_tokens, source_attention_mask)
+        target_embed = self.embedding_layer(target_tokens, target_attention_mask)
 
         # Encode the source tokens
         encoder_output = self.encoder(

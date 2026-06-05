@@ -71,7 +71,7 @@ class DecoderOnlyTransformer(nn.Module):
         padding_mask = (~attention_mask.bool()).unsqueeze(1).unsqueeze(2)
 
         # Embed the input tokens
-        input_embed = self.embedding_layer(input_ids)
+        input_embed = self.embedding_layer(input_ids, attention_mask)
 
         # Decode the input tokens
         decoder_output = self.decoder(

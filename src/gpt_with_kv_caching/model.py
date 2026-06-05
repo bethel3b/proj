@@ -85,12 +85,8 @@ class DecoderOnlyTransformer(nn.Module):
         # so they broadcast over (B, n_heads, Q, K) attention scores.
         padding_mask = (~attention_mask.bool()).unsqueeze(1).unsqueeze(2)
 
-        # During KV-cache decode the input is a single new token but it sits at
-        # position S of the full sequence; derive that offset from the cache.
-        position_offset = kv_cache[0][0].shape[1] if kv_cache else 0
-
         # Embed the input tokens
-        input_embed = self.embedding_layer(input_ids, position_offset=position_offset)
+        input_embed = self.embedding_layer(input_ids, attention_mask)
 
         # Decode the input tokens
         decoder_output, kv_cache = self.decoder(

@@ -30,31 +30,42 @@ class PositionalEncoder(nn.Module):
         # Scale token embeddings by sqrt(d_model), as in Vaswani et al. (2017)
         self.scale = d_model**0.5
 
-    def forward(self, tokens: torch.Tensor, position_offset: int = 0) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Forward pass for the positional encoder.
 
         Args:
-            tokens (torch.Tensor): Input tensor.
+            input_ids (torch.Tensor): Input tensor.
                 Shape: (batch_size, seq_len)
-            position_offset (int, optional): Starting absolute position for the
-                first token in ``tokens``. Non-zero during KV-cache decode, when
-                the input is a single new token sitting at position S of the
-                full sequence rather than position 0.
+            attention_mask (torch.Tensor, optional): Mask of shape
+                (batch_size, total_seq_len); 1 for real tokens, 0 for padding.
+                Used to derive positions so left padding doesn't shift real
+                tokens. When None, positions default to 0..seq_len-1 (no padding
+                assumed). Defaults to None.
 
         Returns:
             torch.Tensor: Output tensor.
                 Shape: (batch_size, seq_len, d_model)
         """
         # Sequence length of the input
-        _, seq_len = tokens.size()
+        _, seq_len = input_ids.size()
 
         # Look up token embeddings and scale - (batch_size, seq_len, d_model)
-        token_embeddings = self.token_embedder(tokens) * self.scale
+        token_embeddings = self.token_embedder(input_ids) * self.scale
 
-        # Build absolute position ids, offset for cached decode - (1, seq_len)
-        positional_ids = torch.arange(
-            position_offset, position_offset + seq_len, device=tokens.device
-        ).unsqueeze(0)
+        if attention_mask is None:
+            # No mask: assume no padding, positions are just 0..seq_len-1 - (1, seq_len)
+            positional_ids = torch.arange(
+                0, seq_len, device=input_ids.device
+            ).unsqueeze(0)
+        else:
+            # Mask-aware positions so left padding doesn't shift real tokens:
+            # cumsum-1 makes the first real token position 0; clamp keeps pads >= 0.
+            positional_ids = (attention_mask.long().cumsum(-1) - 1).clamp(min=0)
+            # During cached decode the mask spans the full sequence but the input
+            # is a single new token, so keep only the newest seq_len positions.
+            positional_ids = positional_ids[:, -seq_len:]
 
         # Look up positional embeddings - (1, seq_len, d_model)
         pos_embeddings = self.pos_embedder(positional_ids)

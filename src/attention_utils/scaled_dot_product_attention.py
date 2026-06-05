@@ -62,6 +62,11 @@ def scaled_dot_product_attention(
     # Softmax
     attention_weights = F.softmax(scaled_score, dim=-1)
 
+    # A fully-masked query row (e.g. a left-pad position that can only attend to
+    # padding) softmaxes to all-NaN. Zero those weights so the NaN doesn't
+    # propagate into real positions through the value sum in later layers.
+    attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
+
     # Dropout
     attention_weights = F.dropout(attention_weights, p=dropout)
 
