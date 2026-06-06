@@ -10,7 +10,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from mlops.utils.train_utils import compute_grad_norm
 from src.utils.utils import print_header
 
 
@@ -20,7 +19,6 @@ class Trainer:
     def __init__(self, args: dict):
         """Unpack the flat `args` dict into the trainer's attributes."""
         # dataloader
-        self.batch_size = args["batch_size"]
         self.train_loader = args["train_loader"]
         self.valid_loader = args["valid_loader"]
         self.test_loader = args["test_loader"]
@@ -41,6 +39,10 @@ class Trainer:
         self.run_name = args["run_name"]
         self.experiment_name = args["experiment_name"]
         self.tracker_url = args["tracker_url"]
+
+        self.model.to(self.device)
+        if self.checkpoint_dir:
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
 
     def train_epoch(
         self,
@@ -117,7 +119,12 @@ class Trainer:
             # Enable system metrics logging
             mlflow.enable_system_metrics_logging()
             mlflow.log_params(
-                {"epochs": self.epochs, "batch_size": self.batch_size, "lr": self.lr}
+                {
+                    "epochs": self.epochs,
+                    "batch_size": len(self.train_loader),
+                    "lr": self.lr,
+                    "checkpoint_dir": self.checkpoint_dir,
+                }
             )
 
             # Track the best-by-val-loss weights so the final test uses them.

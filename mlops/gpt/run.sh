@@ -3,10 +3,22 @@
 # Debug (attach VSCode):  DEBUG=1 bash mlops/gpt/run.sh
 set -euo pipefail
 
-EPOCHS=5
-RUN_NAME="Test: grad norm"
+TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 
-DEBUG=${DEBUG:-0}
+# Hparam
+EPOCHS=20
+BATCH_SIZE=2 # default: 2
+LR=1e-1 # default: 1e-4
+
+# MLFLOW
+EXP_NAME="GPT (Decoder Only)"
+RUN_NAME="Test: mlflow logging ${BATCH_SIZE}bs"
+
+CKPT_ARGS=()
+# CKPT_ARGS=(--checkpoint-dir "run/checkpoints/gpt/${TIMESTAMP}")
+
+
+DEBUG=${DEBUG:-1}
 
 if [[ "$DEBUG" == "1" ]]; then
     echo "Waiting for VSCode debugger to attach on port 5678..."
@@ -18,4 +30,8 @@ fi
 
 $PYRUN mlops/gpt/train.py \
     --epochs "$EPOCHS" \
-    --run-name "$RUN_NAME"
+    --lr "$LR" \
+    --experiment-name "$EXP_NAME" \
+    --run-name "$RUN_NAME" \
+    --batch-size "$BATCH_SIZE" \
+    "${CKPT_ARGS[@]}"

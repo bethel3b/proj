@@ -36,7 +36,7 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
     model.add_argument("--n-layers", type=int, default=6)
     model.add_argument("--max-seq-len", type=int, default=128)
     model.add_argument("--dropout", type=float, default=0.0)
-    # otpimizer args
+    # optimizer args
     optim = parser.add_argument_group("optim")
     optim.add_argument("--lr", type=float, default=1e-4)
     # betas=(0.9, 0.98) and eps=1e-9 are from "Attention Is All You Need".
@@ -52,7 +52,7 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
     criterion.add_argument("--label-smoothing", type=float, default=0.1)
     # scheduler args
     scheduler = parser.add_argument_group("scheduler")
-    scheduler.add_argument("--gamma", type=float, default=0.9)
+    scheduler.add_argument("--eta-min", type=float, default=0.0)
     # training args
     training = parser.add_argument_group("training")
     training.add_argument("--epochs", type=int, default=10)
@@ -90,7 +90,7 @@ def cli_args_parser() -> dict[str, dict[str, Any]]:
             "weight_decay": parsed.weight_decay,
         },
         "criterion_args": {"label_smoothing": parsed.label_smoothing},
-        "scheduler_args": {"gamma": parsed.gamma},
+        "scheduler_args": {"eta_min": parsed.eta_min},
         "training_args": {
             "epochs": parsed.epochs,
             "device": parsed.device,

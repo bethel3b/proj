@@ -4,15 +4,18 @@ from typing import Any
 
 import torch
 from datasets import Dataset, DatasetDict
-from torch import nn, optim
-from torch.optim.lr_scheduler import ExponentialLR
+from torch import nn
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from mlops.gpt.train_args import cli_args_parser
-from mlops.trainer import Trainer
-from src.gpt_with_kv_caching.model import DecoderOnlyTransformer
+from mlops.utils.trainer import Trainer
 from src.utils.utils import print_header
+from mlops.utils.train_utils import (
+    cosine_annealing_lr_scheduler,
+    adamw_optimizer,
+)
+from mlops.gpt.build_model import build_gpt_model
 
 
 def load_dataset(dataset_path: str, seed: int = 42) -> DatasetDict:
@@ -115,7 +118,11 @@ def create_dataloader(
     `collate_fn`. Train is shuffled; valid/test are not."""
     print_header(text="Building DataLoaders (Train/Valid/Test)")
     train_loader = DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        collate_fn=collate_fn,
     )
     valid_loader = DataLoader(
         valid_set, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
@@ -137,46 +144,6 @@ def create_dataloader(
         print(f"{key}: {shape}")
 
     return train_loader, valid_loader, test_loader
-
-
-def build_model(tokenizer: AutoTokenizer, model_args: dict) -> DecoderOnlyTransformer:
-    """Build the decoder-only transformer (GPT) and report its parameter count."""
-    print_header(text="Initializing model")
-    model = DecoderOnlyTransformer(
-        vocab_size=tokenizer.vocab_size,
-        d_model=model_args["d_model"],
-        d_ff=model_args["d_ff"],
-        n_heads=model_args["n_heads"],
-        n_layers=model_args["n_layers"],
-        max_seq_len=model_args["max_seq_len"],
-        dropout=model_args["dropout"],
-    )
-    total = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(
-        f"Model: d_model={model_args['d_model']}, d_ff={model_args['d_ff']}, "
-        f"heads={model_args['n_heads']}, layers={model_args['n_layers']}, "
-        f"max_seq_len={model_args['max_seq_len']}, dropout={model_args['dropout']}"
-    )
-    print(f"Params: {total:,} total ({trainable:,} trainable)")
-    return model
-
-
-def initialize_optimizer(model: nn.Module, optim_args: dict) -> optim.AdamW:
-    """Build an AdamW optimizer over `model.parameters()` from `optim_args`."""
-    print_header(text="Initializing optimizer")
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=optim_args["lr"],
-        betas=optim_args["betas"],
-        eps=optim_args["eps"],
-        weight_decay=optim_args["weight_decay"],
-    )
-    print(
-        f"Optimizer: AdamW(lr={optim_args['lr']}, betas={optim_args['betas']}, "
-        f"eps={optim_args['eps']}, weight_decay={optim_args['weight_decay']})"
-    )
-    return optimizer
 
 
 def initialize_criterion(
@@ -216,7 +183,7 @@ def train(args) -> None:
     train_set, valid_set, test_set, tokenizer = tokenize_dataset(
         dataset_dict=dataset_dict, tokenizer_args=args["tokenizer_args"]
     )
-    # build dataloader
+    # Build dataloader
     train_loader, valid_loader, test_loader = create_dataloader(
         train_set=train_set,
         valid_set=valid_set,
@@ -224,18 +191,28 @@ def train(args) -> None:
         batch_size=args["dataloader_args"]["batch_size"],
     )
 
-    # Build model, optimizer and criterion
-    model = build_model(tokenizer=tokenizer, model_args=args["model_args"])
-    optimizer = initialize_optimizer(model=model, optim_args=args["optim_args"])
+    # Build model
+    model = build_gpt_model(
+        vocab_size=tokenizer.vocab_size, model_args=args["model_args"]
+    )
+    # Build optimizer
+    optimizer = adamw_optimizer(
+        model=model,
+        lr=args["optim_args"]["lr"],
+        betas=args["optim_args"]["betas"],
+        eps=args["optim_args"]["eps"],
+        weight_decay=args["optim_args"]["weight_decay"],
+    )
+    # Build Scheduler
+    scheduler = cosine_annealing_lr_scheduler(
+        optimizer=optimizer,
+        epochs=args["training_args"]["epochs"],
+        eta_min=args["scheduler_args"]["eta_min"],
+    )
+    # Build criterion
     criterion = initialize_criterion(
         tokenizer=tokenizer, criterion_args=args["criterion_args"]
     )
-
-    print_header(text="Initial Scheduler")
-    scheduler = ExponentialLR(optimizer, gamma=args["scheduler_args"]["gamma"])
-
-    device = args["training_args"]["device"]
-    model.to(device)
 
     trainer_args = {
         "train_loader": train_loader,
@@ -245,7 +222,6 @@ def train(args) -> None:
         "optimizer": optimizer,
         "criterion": criterion,
         "scheduler": scheduler,
-        "batch_size": args["dataloader_args"]["batch_size"],
         **args["training_args"],
         **args["dataloader_args"],
         **args["optim_args"],
