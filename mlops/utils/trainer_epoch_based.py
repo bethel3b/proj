@@ -32,7 +32,7 @@ class Trainer:
         # scheduler
         self.scheduler = args["scheduler"]
         # training
-        self.epochs = args["epochs"]
+        self.total_steps = args["total_steps"]
         self.device = args["device"]
         self.checkpoint_dir = args["checkpoint_dir"]
         # mlflow
@@ -43,6 +43,18 @@ class Trainer:
         self.model.to(self.device)
         if self.checkpoint_dir:
             os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+        # Step-based knobs
+        step_per_epoch = len(self.train_loader)  # affected by drop_last
+        self.batch_size = self.train_loader.batch_size
+        self.epochs = self.total_steps // step_per_epoch
+
+        # Track the best-by-val-loss weights so the final test uses them.
+        self.best_state = copy.deepcopy(self.model.state_dict())
+        self.best_val_loss = float("inf")
+        self.best_epoch = 0
+        self.epoch_one_loss = None
+        self.global_step = 0
 
     def train_epoch(
         self,
@@ -122,17 +134,11 @@ class Trainer:
                 {
                     "epochs": self.epochs,
                     "batch_size": len(self.train_loader),
+                    "total_steps": self.total_steps,
                     "lr": self.lr,
                     "checkpoint_dir": self.checkpoint_dir,
                 }
             )
-
-            # Track the best-by-val-loss weights so the final test uses them.
-            best_state = copy.deepcopy(self.model.state_dict())
-            best_val_loss = float("inf")
-            best_epoch = 0
-            epoch_one_loss = None
-            global_step = 0
 
             # Initial Validation
             print_header(text="Initial Validation")
@@ -147,14 +153,14 @@ class Trainer:
             print_header(text="Started Training")
             for epoch in range(1, self.epochs + 1):
                 # Training
-                train_loss, global_step = self.train_epoch(
+                train_loss, self.global_step = self.train_epoch(
                     epoch=epoch,
                     loader=self.train_loader,
-                    global_step=global_step,
+                    global_step=self.global_step,
                     mode="Train",
                 )
                 if epoch == 1:
-                    epoch_one_loss = train_loss
+                    self.epoch_one_loss = train_loss
 
                 # Validation
                 with torch.no_grad():
@@ -162,24 +168,24 @@ class Trainer:
                         epoch=epoch,
                         loader=self.valid_loader,
                         mode="Val",
-                        global_step=global_step,
+                        global_step=self.global_step,
                     )
 
                 self.scheduler.step()
 
-                if val_loss <= best_val_loss:
-                    best_state = copy.deepcopy(self.model.state_dict())
-                    best_epoch = epoch
-                    best_val_loss = val_loss
+                if val_loss <= self.best_val_loss:
+                    self.best_state = copy.deepcopy(self.model.state_dict())
+                    self.best_epoch = epoch
+                    self.best_val_loss = val_loss
 
                     if self.checkpoint_dir:
                         ckpt_path = os.path.join(self.checkpoint_dir, "best.pt")
                         torch.save(
                             {
-                                "epoch": best_epoch,
-                                "model_state_dict": best_state,
+                                "epoch": self.best_epoch,
+                                "model_state_dict": self.best_state,
                                 "optimizer_state_dict": self.optimizer.state_dict(),
-                                "val_loss": best_val_loss,
+                                "val_loss": self.best_val_loss,
                             },
                             ckpt_path,
                         )
@@ -188,17 +194,17 @@ class Trainer:
 
             print(
                 f"\nInitial Loss [epoch 0]={init_loss:.4f}"
-                f"\nLoss [epoch 1]={epoch_one_loss}"
+                f"\nLoss [epoch 1]={self.epoch_one_loss}"
                 f"\nFinal Loss [epoch {epoch}]={val_loss:.4f}"
-                f"\nBest Loss [epoch {best_epoch}]={best_val_loss:.4f}"
+                f"\nBest Loss [epoch {self.best_epoch}]={self.best_val_loss:.4f}"
             )
 
             # Final test — restore the best validation checkpoint first.
-            self.model.load_state_dict(best_state)
+            self.model.load_state_dict(self.best_state)
             print_header(text="Final Test")
             with torch.no_grad():
                 test_loss, _ = self.train_epoch(
-                    epoch=best_epoch,
+                    epoch=self.best_epoch,
                     loader=self.test_loader,
                     mode="Test",
                     global_step=None,
